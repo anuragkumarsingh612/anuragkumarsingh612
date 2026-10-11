@@ -5,6 +5,7 @@ import { Providers } from "./app/providers";
 import { router } from "./app/router";
 import "@fontsource-variable/manrope";
 import "./styles.css";
+import "./restoq.css";
 import "./features/settings/InstallPrompt";
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

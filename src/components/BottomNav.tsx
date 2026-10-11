@@ -1,30 +1,19 @@
 import { NavLink } from "react-router-dom";
-import { House, Plus, History, Users } from "lucide-react";
-import { copy } from "../lib/i18n";
+import { LayoutGrid, ScanLine, Archive, Users } from "lucide-react";
 export function BottomNav() {
   return (
-    <nav className="bottom-nav" aria-label={copy.common.home}>
-      <NavLink to="/" end>
-        <House size={21} />
-        <span>{copy.common.home}</span>
-      </NavLink>
-      <NavLink
-        to="/add"
-        className={({ isActive }) => `nav-add ${isActive ? "active" : ""}`}
-      >
-        <span className="fab">
-          <Plus size={27} />
-        </span>
-        <span>{copy.common.add}</span>
-      </NavLink>
-      <NavLink to="/history">
-        <History size={21} />
-        <span>{copy.common.history}</span>
-      </NavLink>
-      <NavLink to="/household">
-        <Users size={21} />
-        <span>{copy.common.household}</span>
-      </NavLink>
+    <nav className="bottom-nav" aria-label="Mobile navigation">
+      {[
+        { to: "/", label: "Due Now", Icon: LayoutGrid },
+        { to: "/add", label: "Add Photo", Icon: ScanLine },
+        { to: "/pantry", label: "Pantry", Icon: Archive },
+        { to: "/household", label: "Household", Icon: Users },
+      ].map(({ to, label, Icon }) => (
+        <NavLink to={to} end={to === "/"} key={to}>
+          <Icon size={21} />
+          <span>{label}</span>
+        </NavLink>
+      ))}
     </nav>
   );
 }

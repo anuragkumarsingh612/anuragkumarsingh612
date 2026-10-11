@@ -39,6 +39,14 @@ export const router = createBrowserRouter([
     children: [
       { index: true, element: page(Home) },
       { path: "add", element: page(Capture) },
+      {
+        path: "pantry",
+        element: (
+          <Suspense fallback={<Skeleton />}>
+            <Home pantry />
+          </Suspense>
+        ),
+      },
       { path: "confirm", element: page(Confirm) },
       { path: "history", element: page(History) },
       { path: "household", element: page(Household) },

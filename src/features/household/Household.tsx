@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { useDemo } from "../../app/context";
 import { copy as c, interpolate as f } from "../../lib/i18n";
+import { saveHousehold, supabase } from "../../lib/supabase";
 import { householdSchema } from "../../lib/schemas";
 import { Button, Card, Empty, PageHeading, Sheet } from "../../components/ui";
 export default function Household() {
@@ -45,31 +46,36 @@ export default function Household() {
       </Card>
       <div className="section-title small">
         <h2>{c.household.members}</h2>
-        <span className="muted-text">{c.household.demoMembers}</span>
+        <span className="muted-text">
+          {supabase ? "Your session" : c.household.demoMembers}
+        </span>
       </div>
       <Card className="members-card">
         <div className="member">
           <span className="avatar lavender">AS</span>
           <div>
             <h3>
-              Ananya Sharma <small>({c.household.you})</small>
+              {supabase ? "Household owner" : "Ananya Sharma"}{" "}
+              <small>({c.household.you})</small>
             </h3>
             <p>{c.household.owner}</p>
           </div>
           <span className="online-dot" />
         </div>
-        <div className="member">
-          <span className="avatar peach">RS</span>
-          <div>
-            <h3>Rohan Sharma</h3>
-            <p>{c.household.member}</p>
+        {!supabase && (
+          <div className="member">
+            <span className="avatar peach">RS</span>
+            <div>
+              <h3>Rohan Sharma</h3>
+              <p>{c.household.member}</p>
+            </div>
           </div>
-        </div>
+        )}
       </Card>
       <div className="section-title list-heading">
         <div>
           <h2>{c.household.list}</h2>
-          <p>{c.household.listCopy}</p>
+          <p>Shopping notes saved on this device.</p>
         </div>
       </div>
       <form
@@ -180,10 +186,11 @@ export default function Household() {
 }
 export function HouseholdForm({ onComplete }: { onComplete: () => void }) {
   const { state, setState, notify } = useDemo();
+  const [saveError, setSaveError] = useState("");
   const {
     register,
     handleSubmit,
-    formState: { errors },
+    formState: { errors, isSubmitting },
   } = useForm<z.infer<typeof householdSchema>>({
     resolver: zodResolver(householdSchema),
     defaultValues: state.household,
@@ -191,7 +198,13 @@ export function HouseholdForm({ onComplete }: { onComplete: () => void }) {
   return (
     <form
       className="household-form"
-      onSubmit={handleSubmit((household) => {
+      onSubmit={handleSubmit(async (household) => {
+        try {
+          await saveHousehold(household);
+        } catch (e) {
+          setSaveError(e instanceof Error ? e.message : "Could not save.");
+          return;
+        }
         setState((s) => ({ ...s, household }));
         notify(c.household.saved);
         onComplete();
@@ -217,7 +230,12 @@ export function HouseholdForm({ onComplete }: { onComplete: () => void }) {
           <span className="field-error">{errors.city.message}</span>
         )}
       </label>
-      <Button type="submit" className="full-width">
+      {saveError && (
+        <p className="field-error" role="alert">
+          {saveError}
+        </p>
+      )}
+      <Button type="submit" disabled={isSubmitting} className="full-width">
         {c.household.save}
       </Button>
     </form>

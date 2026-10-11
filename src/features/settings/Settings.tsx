@@ -11,6 +11,7 @@ import {
   LogIn,
 } from "lucide-react";
 import { useDemo } from "../../app/context";
+import { supabase } from "../../lib/supabase";
 import { initialState } from "../../app/demo";
 import { copy as c } from "../../lib/i18n";
 import { csvCell } from "../../lib/format";
@@ -50,8 +51,14 @@ export default function Settings() {
     <div className="page">
       <PageHeading title={c.settings.title} subtitle={c.settings.subtitle} />
       <div className="demo-notice">
-        <span className="eyebrow">{c.settings.phase}</span>
-        <p>{c.settings.phaseCopy}</p>
+        <span className="eyebrow">
+          {supabase ? "CONNECTED HOUSEHOLD" : "YOUR LOCAL PANTRY"}
+        </span>
+        <p>
+          {supabase
+            ? "Purchases and reminders are saved to your Supabase household. Keep this browser session to retain access to your anonymous account."
+            : "Explore Restoq with a sample household. Your changes are saved on this device."}
+        </p>
       </div>
       <h2 className="subheading">{c.settings.account}</h2>
       <Card className="settings-links">
@@ -73,34 +80,45 @@ export default function Settings() {
           <span>{c.settings.export}</span>
           <ChevronRight size={17} />
         </button>
-        <button
-          onClick={() => {
-            setState(initialState());
-            notify(c.common.resetDone);
-          }}
-        >
-          <RotateCcw size={19} />
-          <span>{c.common.reset}</span>
-          <ChevronRight size={17} />
-        </button>
-        <button className="danger-text" onClick={() => setRemove(true)}>
-          <Trash2 size={19} />
-          <span>{c.settings.delete}</span>
-          <ChevronRight size={17} />
-        </button>
+        {!supabase && (
+          <button
+            onClick={() => {
+              setState(initialState());
+              notify(c.common.resetDone);
+            }}
+          >
+            <RotateCcw size={19} />
+            <span>{c.common.reset}</span>
+            <ChevronRight size={17} />
+          </button>
+        )}
+        {!supabase && (
+          <button className="danger-text" onClick={() => setRemove(true)}>
+            <Trash2 size={19} />
+            <span>{c.settings.delete}</span>
+            <ChevronRight size={17} />
+          </button>
+        )}
       </Card>
       <div className="privacy-info">
         <ImageOff size={22} />
         <div>
           <h2>{c.settings.noPhotos}</h2>
-          <p>{c.settings.noPhotosCopy}</p>
+          <p>
+            Photos are processed only when you ask. Restoq does not store the
+            image after reading; OpenAI’s API data retention policy applies to
+            submitted images.
+          </p>
         </div>
       </div>
       <div className="privacy-info">
         <ShieldCheck size={22} />
         <div>
           <h2>{c.settings.privacy}</h2>
-          <p>{c.settings.privacyCopy}</p>
+          <p>
+            Your household data belongs to you. Export your purchase history
+            whenever you need it.
+          </p>
         </div>
       </div>
       <InstallPrompt />

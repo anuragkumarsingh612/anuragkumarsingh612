@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   Camera,
   ImagePlus,
@@ -14,7 +14,25 @@ import {
 import { PageHeading, Button } from "../../components/ui";
 import { copy as c } from "../../lib/i18n";
 import { prepareImage } from "../../lib/image";
+import { parseReceipt } from "../../lib/supabase";
 export default function Capture() {
+  const navigate = useNavigate();
+  const [photo, setPhoto] = useState<Blob | null>(null);
+  const [reading, setReading] = useState(false);
+  async function extract() {
+    if (!photo) return;
+    const id = ++request.current;
+    setReading(true);
+    setError("");
+    try {
+      const receipt = await parseReceipt(photo, type);
+      if (id === request.current) navigate("/confirm", { state: { receipt } });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not read this image.");
+    } finally {
+      setReading(false);
+    }
+  }
   const [type, setType] = useState("bill");
   const [preview, setPreview] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -38,10 +56,15 @@ export default function Capture() {
     if (!file) return;
     const id = ++request.current;
     setBusy(true);
+    setPhoto(null);
+    setPreview(null);
     setError("");
     try {
       const blob = await prepareImage(file);
-      if (id === request.current) setPreview(URL.createObjectURL(blob));
+      if (id === request.current) {
+        setPreview(URL.createObjectURL(blob));
+        setPhoto(blob);
+      }
     } catch (err) {
       if (id === request.current)
         setError(err instanceof Error ? err.message : c.capture.failed);
@@ -83,14 +106,17 @@ export default function Capture() {
           </>
         )}
         <div className="photo-actions">
-          <Button onClick={() => camera.current?.click()} disabled={busy}>
+          <Button
+            onClick={() => camera.current?.click()}
+            disabled={busy || reading}
+          >
             <Camera size={18} />
             {preview ? c.capture.change : c.capture.camera}
           </Button>
           <Button
             variant="secondary"
             onClick={() => gallery.current?.click()}
-            disabled={busy}
+            disabled={busy || reading}
           >
             <ImagePlus size={18} />
             {c.capture.gallery}
@@ -137,6 +163,20 @@ export default function Capture() {
           {error}
         </p>
       )}
+      {preview && (
+        <Button
+          className="full-width"
+          disabled={busy || reading}
+          onClick={() => void extract()}
+        >
+          {reading ? (
+            <Loader2 className="spin" size={18} />
+          ) : (
+            <ReceiptText size={18} />
+          )}{" "}
+          {reading ? "Reading your receipt…" : "Read photo with AI"}
+        </Button>
+      )}
       <div className="inline-tip">
         <Lightbulb size={18} />
         {c.capture.tip}
@@ -146,8 +186,11 @@ export default function Capture() {
         <ArrowRight size={18} />
       </Link>
       <div className="demo-notice">
-        <span className="eyebrow">{c.settings.phase}</span>
-        <p>{c.capture.demoNotice}</p>
+        <span className="eyebrow">TRY IT OUT</span>
+        <p>
+          Curious how it works? Take a look at an example receipt before adding
+          your own.
+        </p>
         <Link to="/confirm?sample=1">
           {c.capture.sample}
           <ArrowRight size={15} />
@@ -155,7 +198,8 @@ export default function Capture() {
       </div>
       <p className="privacy-block">
         <ShieldCheck size={17} />
-        {c.capture.privacy}
+        Your photo is sent securely for reading only when you tap “Read photo
+        with AI.” Review every item before saving.
       </p>
     </div>
   );

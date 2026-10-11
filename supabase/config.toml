@@ -1,0 +1,4 @@
+project_id = "restoq"
+[functions.parse-receipt]
+# The function verifies the bearer token using Supabase auth.getUser.
+verify_jwt = false

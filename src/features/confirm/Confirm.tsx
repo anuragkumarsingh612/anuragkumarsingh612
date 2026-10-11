@@ -1,6 +1,6 @@
 import { useFieldArray, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import { Check, Plus, Trash2, Info } from "lucide-react";
 import { useDemo } from "../../app/context";
 import { STORES, type Product, type Purchase } from "../../app/demo";
@@ -8,10 +8,24 @@ import { confirmationSchema, type Confirmation } from "../../lib/schemas";
 import { copy as c, interpolate as f } from "../../lib/i18n";
 import { today, rupees } from "../../lib/format";
 import { Button, PageHeading } from "../../components/ui";
+import { useState } from "react";
+import { savePurchase, supabase } from "../../lib/supabase";
+import { purchaseRowSchema } from "../../lib/schemas";
+import { z } from "zod";
 import { InstallPrompt } from "../settings/InstallPrompt";
 export default function Confirm() {
   const [params] = useSearchParams();
   const sample = params.get("sample") === "1";
+  const location = useLocation();
+  const parsed = z
+    .object({
+      store: z.string().nullable(),
+      items: z.array(purchaseRowSchema).min(1).max(100),
+    })
+    .safeParse(location.state?.receipt);
+  const receipt = parsed.success ? parsed.data : null;
+  const [saveError, setSaveError] = useState("");
+  const [saved, setSaved] = useState(false);
   const { setState, notify } = useDemo();
   const navigate = useNavigate();
   const {
@@ -19,28 +33,52 @@ export default function Confirm() {
     control,
     handleSubmit,
     watch,
-    formState: { errors, isSubmitting, isSubmitSuccessful },
+    formState: { errors, isSubmitting },
   } = useForm<Confirmation>({
     resolver: zodResolver(confirmationSchema),
     defaultValues: {
-      store: sample ? "D-Mart" : STORES[0],
+      store: receipt?.store || (sample ? "D-Mart" : STORES[0]),
       date: today(),
-      items: sample
-        ? [
-            {
-              name: "Aashirvaad Shudh Chakki Atta",
-              quantity: 1,
-              price: 245,
-              confidence: 0.96,
-            },
-            { name: "Tata Salt", quantity: 1, price: 28, confidence: 0.62 },
-          ]
-        : [{ name: "", quantity: 1, price: null, confidence: 1 }],
+      items:
+        receipt?.items ??
+        (sample
+          ? [
+              {
+                name: "Aashirvaad Shudh Chakki Atta",
+                quantity: 1,
+                price: 245,
+                confidence: 0.96,
+              },
+              { name: "Tata Salt", quantity: 1, price: 28, confidence: 0.95 },
+              {
+                name: "MTR Garam Masala 100g",
+                quantity: 1,
+                price: 72,
+                confidence: 0.52,
+              },
+              {
+                name: "Fortune Sunlite Oil",
+                quantity: 2,
+                price: 278,
+                confidence: 0.98,
+              },
+            ]
+          : [{ name: "", quantity: 1, price: null, confidence: 1 }]),
     },
   });
   const { fields, append, remove } = useFieldArray({ control, name: "items" });
   const items = watch("items");
-  function save(data: Confirmation) {
+  async function save(data: Confirmation) {
+    setSaveError("");
+    let remote: Array<{ id: string; name: string }> | null;
+    try {
+      remote = await savePurchase(data);
+    } catch (e) {
+      setSaveError(
+        e instanceof Error ? e.message : "Could not save. Please try again.",
+      );
+      return;
+    }
     setState((s) => {
       const products = [...s.products];
       const purchases: Purchase[] = [];
@@ -50,7 +88,10 @@ export default function Confirm() {
         );
         if (!product) {
           product = {
-            id: crypto.randomUUID(),
+            id:
+              remote?.find(
+                (p) => p.name.toLowerCase() === row.name.toLowerCase(),
+              )?.id ?? crypto.randomUUID(),
             name: row.name,
             pack: "",
             category: "pantry",
@@ -95,15 +136,20 @@ export default function Confirm() {
       };
     });
     notify(c.confirm.saved);
+    setSaved(true);
   }
-  if (isSubmitSuccessful)
+  if (saved)
     return (
       <div className="page success-page">
         <div className="success-icon">
           <Check size={34} />
         </div>
         <h1>{c.confirm.saved}</h1>
-        <p>{c.common.demoNote}</p>
+        <p>
+          {supabase
+            ? "Your household pantry is up to date."
+            : "Saved to your pantry on this device."}
+        </p>
         <Button onClick={() => navigate("/history")}>{c.common.history}</Button>
         <InstallPrompt />
         <Button variant="ghost" onClick={() => navigate("/")}>
@@ -113,20 +159,34 @@ export default function Confirm() {
     );
   return (
     <div className="page">
-      <PageHeading title={c.confirm.title} subtitle={c.confirm.subtitle} back />
+      <PageHeading
+        title={receipt || sample ? "Receipt, meet pantry." : c.confirm.title}
+        subtitle="A quick once-over, then you’re all stocked up."
+        back
+      />
       <div className="info-banner">
         <Info size={17} />
-        {sample ? c.confirm.sampleNotice : c.confirm.manualNotice}
+        {receipt
+          ? "AI has read your photo. Check the names, quantities and prices before saving."
+          : sample
+            ? "Example receipt · Try editing an item to make it your own."
+            : c.confirm.manualNotice}
       </div>
+      {saveError && (
+        <div className="error-banner" role="alert">
+          {saveError}
+        </div>
+      )}
       <form onSubmit={handleSubmit(save)}>
         <div className="form-grid">
           <label>
             {c.common.store}
-            <select {...register("store")}>
+            <input list="stores" {...register("store")} />
+            <datalist id="stores">
               {STORES.map((store) => (
                 <option key={store}>{store}</option>
               ))}
-            </select>
+            </datalist>
             {errors.store && (
               <span className="field-error">{errors.store.message}</span>
             )}
@@ -148,6 +208,9 @@ export default function Confirm() {
               <div className="row-top">
                 <span className="eyebrow">
                   {f(c.confirm.itemNumber, { number: i + 1 })}
+                </span>
+                <span className="receipt-match">
+                  {Math.round(field.confidence * 100)}% match
                 </span>
                 {field.confidence < 0.7 && (
                   <span className="check-tag">{c.confirm.check}</span>

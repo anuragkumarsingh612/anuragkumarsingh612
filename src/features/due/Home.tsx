@@ -1,332 +1,377 @@
-import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
 import {
+  Plus,
   ArrowUpRight,
   ArrowRight,
   Check,
   Clock3,
-  Minus,
-  ShieldCheck,
+  X,
   Sparkles,
   Lightbulb,
+  ScanLine,
+  ShieldCheck,
+  Package,
+  CalendarDays,
+  SlidersHorizontal,
+  ChevronRight,
+  Leaf,
 } from "lucide-react";
 import { useDemo } from "../../app/context";
 import { isDue, type Product } from "../../app/demo";
-import { copy as c, interpolate as f } from "../../lib/i18n";
 import { dayDistance, daysAgo, today } from "../../lib/format";
-import { ProductArt, GroceryArt } from "../../components/Artwork";
-import { Button, Empty, Sheet } from "../../components/ui";
-type Tab = "due" | "upcoming" | "all";
-export default function Home() {
+import { ProductArt } from "../../components/Artwork";
+import { Empty } from "../../components/ui";
+import { cycleForProduct } from "../../lib/cycles";
+import { savePurchase, updateProduct } from "../../lib/supabase";
+export default function Home({ pantry = false }: { pantry?: boolean }) {
   const { state, setState, notify } = useDemo();
-  const navigate = useNavigate();
-  const [tab, setTab] = useState<Tab>("due");
-  const [ignore, setIgnore] = useState<Product | null>(null);
-  const due = state.products
-    .filter(isDue)
-    .sort(
-      (a, b) =>
-        (dayDistance(b.last) / b.gap) * b.confidence -
-        (dayDistance(a.last) / a.gap) * a.confidence,
-    )
-    .slice(0, 15);
-  const upcoming = state.products.filter((p) => !p.ignored && !isDue(p));
-  const visible =
-    tab === "due" ? due : tab === "upcoming" ? upcoming : state.products;
-  function action(product: Product, kind: "bought" | "not_needed" | "snoozed") {
-    setState((s) => ({
-      ...s,
-      products: s.products.map((p) =>
-        p.id !== product.id
-          ? p
-          : kind === "bought"
-            ? { ...p, last: today(), snoozeUntil: null, skips: 0 }
-            : {
-                ...p,
-                snoozeUntil: daysAgo(
-                  -Math.ceil(kind === "snoozed" ? 3 : p.gap / 2),
-                ),
-                skips: kind === "not_needed" ? p.skips + 1 : 0,
-                confidence:
-                  kind === "not_needed" && p.skips === 2
-                    ? p.confidence * 0.7
-                    : p.confidence,
-              },
-      ),
-      purchases:
+  const [tab, setTab] = useState<"due" | "upcoming" | "all">(
+    pantry ? "all" : "due",
+  );
+  useEffect(() => {
+    setTab(pantry ? "all" : "due");
+    setFilter("all");
+  }, [pantry]);
+  const [filter, setFilter] = useState("all");
+  const [busy, setBusy] = useState<string | null>(null);
+  const products = state.products.map((p) =>
+    cycleForProduct(p, state.purchases),
+  );
+  const due = products.filter(isDue);
+  const upcoming = products.filter((p) => !p.ignored && !isDue(p));
+  const visible = (
+    tab === "due" ? due : tab === "upcoming" ? upcoming : products
+  ).filter((p) => filter === "all" || p.category === filter);
+  async function action(product: Product, kind: "bought" | "snoozed" | "skip") {
+    setBusy(product.id);
+    try {
+      if (kind === "bought")
+        await savePurchase({
+          store: product.store,
+          date: today(),
+          items: [
+            { name: product.name, quantity: 1, price: null, confidence: 1 },
+          ],
+        });
+      else
+        await updateProduct(product.id, {
+          snooze_until: daysAgo(
+            kind === "snoozed" ? -3 : -Math.ceil(product.gap / 2),
+          ),
+        });
+      setState((s) => ({
+        ...s,
+        products: s.products.map((p) =>
+          p.id !== product.id
+            ? p
+            : kind === "bought"
+              ? { ...p, last: today(), snoozeUntil: null, skips: 0 }
+              : {
+                  ...p,
+                  snoozeUntil: daysAgo(
+                    kind === "snoozed" ? -3 : -Math.ceil(p.gap / 2),
+                  ),
+                  skips: p.skips + 1,
+                },
+        ),
+        purchases:
+          kind === "bought"
+            ? [
+                {
+                  id: crypto.randomUUID(),
+                  productId: product.id,
+                  name: product.name,
+                  store: product.store,
+                  date: today(),
+                  quantity: 1,
+                  price: null,
+                  source: "tick",
+                },
+                ...s.purchases,
+              ]
+            : s.purchases,
+      }));
+      notify(
         kind === "bought"
-          ? [
-              {
-                id: crypto.randomUUID(),
-                productId: product.id,
-                name: product.name,
-                store: product.store,
-                date: today(),
-                quantity: 1,
-                price: null,
-                source: "tick",
-              },
-              ...s.purchases,
-            ]
-          : s.purchases,
-    }));
-    notify(
-      f(
-        kind === "bought"
-          ? c.home.boughtToast
-          : kind === "not_needed"
-            ? c.home.notNeededToast
-            : c.home.snoozedToast,
-        { name: product.name },
-      ),
-    );
-    if (kind === "not_needed" && product.skips === 2) setIgnore(product);
+          ? `${product.name} is restocked. One less thing to think about.`
+          : kind === "snoozed"
+            ? "Reminder moved to 3 days from now."
+            : "Skipped for this cycle.",
+      );
+    } catch (e) {
+      notify(
+        e instanceof Error ? e.message : "Could not save. Please try again.",
+      );
+    } finally {
+      setBusy(null);
+    }
   }
   return (
-    <div className="page home-page">
-      <p className="greeting">{c.home.greeting}</p>
-      <section className="hero-card">
-        <div className="hero-topline">
-          <span className="eyebrow">{c.home.eyebrow}</span>
-          <Sparkles size={14} />
-        </div>
-        <div className="hero-content">
-          <h1>{c.home.heroTitle}</h1>
-          <p>{c.home.heroCopy}</p>
-          <GroceryArt />
-        </div>
-        <Link to="/add" className="button button-primary hero-button">
-          <span className="plus-symbol">+</span>
-          {c.home.addBill}
-          <ArrowUpRight size={19} />
-        </Link>
-      </section>
-      <p className="privacy-caption">
-        <ShieldCheck size={12} />
-        {c.home.private}
-      </p>
-      <section className="stats" aria-label={c.home.trackingCount}>
+    <div className="page dashboard-page">
+      <div className="welcome-row">
         <div>
-          <strong>
-            {String(due.length).padStart(2, "0")}
-            <span className="stat-dot" />
-          </strong>
-          <span>{c.home.dueCount}</span>
-        </div>
-        <div>
-          <strong>{String(state.products.length).padStart(2, "0")}</strong>
-          <span>{c.home.trackingCount}</span>
-        </div>
-        <div>
-          <strong>
-            {String(new Set(state.purchases.map((p) => p.store)).size).padStart(
-              2,
-              "0",
-            )}
-          </strong>
-          <span>{c.home.storesCount}</span>
-        </div>
-      </section>
-      <section className="restock-section">
-        <div className="section-title">
-          <div>
-            <h2>{c.home.title}</h2>
-            <p>{c.home.subtitle}</p>
+          <div className="day-kicker">
+            <span className="tiny-dot" /> YOUR HOME, ONE STEP AHEAD
           </div>
-          <span className="section-icon">
-            <ShoppingBagIcon />
+          <h1>
+            {pantry ? "Your everyday essentials." : "Good to have you home."}
+            <span className="greeting-sun">✳</span>
+          </h1>
+          <p>
+            {pantry
+              ? "A little overview of everything that keeps your home running."
+              : "Less remembering. More living. We’ve got your essentials covered."}
+          </p>
+        </div>
+        <Link to="/add" className="button button-primary top-add">
+          <Plus size={17} /> Add Photo
+        </Link>
+      </div>
+      {!pantry && (
+        <section className="pantry-hero">
+          <div className="hero-photo" />
+          <div className="hero-shade" />
+          <div className="hero-copy">
+            <div className="hero-label">
+              <Sparkles size={13} /> A LITTLE FORESIGHT GOES A LONG WAY
+            </div>
+            <h2>
+              A full pantry.
+              <br />
+              <span>A lighter mind.</span>
+            </h2>
+            <p>
+              Your everyday essentials, restocked at the right time.
+              <br className="desktop-break" /> Just add a bill. We’ll connect
+              the dots.
+            </p>
+            <Link to="/add" className="hero-cta">
+              <ScanLine size={17} /> Scan your grocery bill{" "}
+              <ArrowUpRight size={17} />
+            </Link>
+          </div>
+          <div className="hero-photo-label">
+            <span className="tiny-dot" /> Small habits. Happier homes.
+          </div>
+        </section>
+      )}
+      <section className="overview-stats">
+        <div>
+          <span className="stat-icon lavender-icon">
+            <Package size={20} />
+          </span>
+          <div>
+            <span>On your radar</span>
+            <strong>
+              {String(due.length).padStart(2, "0")}
+              <small>essentials due</small>
+            </strong>
+          </div>
+          <span className="stat-pill">Let’s restock</span>
+        </div>
+        <div>
+          <span className="stat-icon green-icon">
+            <Leaf size={20} />
+          </span>
+          <div>
+            <span>A well-kept pantry</span>
+            <strong>
+              {String(products.length).padStart(2, "0")}
+              <small>items tracked</small>
+            </strong>
+          </div>
+        </div>
+        <div>
+          <span className="stat-icon amber-icon">
+            <CalendarDays size={20} />
+          </span>
+          <div>
+            <span>Getting to know you</span>
+            <strong>
+              {new Set(state.purchases.map((p) => p.date)).size}
+              <small>shopping days logged</small>
+            </strong>
+          </div>
+        </div>
+      </section>
+      <section className="due-section">
+        <div className="due-heading">
+          <div>
+            <h2>
+              {pantry ? "My Pantry" : "Due for a little restock"}{" "}
+              <span className="count-badge">{due.length}</span>
+            </h2>
+            <p>A gentle nudge, based on your household’s rhythm.</p>
+          </div>
+          <span className="prediction-label">
+            <Sparkles size={13} /> Smart predictions
           </span>
         </div>
-        <div className="tabs" role="tablist" aria-label={c.home.title}>
-          {(["due", "upcoming", "all"] as const).map((t) => (
-            <button
-              key={t}
-              role="tab"
-              aria-selected={tab === t}
-              tabIndex={tab === t ? 0 : -1}
-              onKeyDown={(event) => {
-                const tabs: Tab[] = ["due", "upcoming", "all"];
-                const index = tabs.indexOf(t);
-                const next =
-                  event.key === "ArrowRight"
-                    ? tabs[(index + 1) % 3]
-                    : event.key === "ArrowLeft"
-                      ? tabs[(index + 2) % 3]
-                      : event.key === "Home"
-                        ? tabs[0]
-                        : event.key === "End"
-                          ? tabs[2]
-                          : null;
-                if (next) {
-                  event.preventDefault();
-                  setTab(next);
-                  document.getElementById(`tab-${next}`)?.focus();
-                }
-              }}
-              id={`tab-${t}`}
-              aria-controls="products-panel"
-              onClick={() => setTab(t)}
-              className={tab === t ? "selected" : ""}
-            >
-              {t === "due"
-                ? c.home.dueTab
-                : t === "upcoming"
-                  ? c.home.upcomingTab
-                  : c.home.allTab}
-              <span>
+        <div className="filter-row">
+          <div className="dashboard-tabs">
+            {(["due", "upcoming", "all"] as const).map((t) => (
+              <button
+                key={t}
+                aria-pressed={tab === t}
+                onClick={() => setTab(t)}
+                className={tab === t ? "selected" : ""}
+              >
                 {t === "due"
-                  ? due.length
+                  ? "Due now"
                   : t === "upcoming"
-                    ? upcoming.length
-                    : state.products.length}
-              </span>
-            </button>
-          ))}
+                    ? "Coming up"
+                    : "All items"}
+                <span>
+                  {t === "due"
+                    ? due.length
+                    : t === "upcoming"
+                      ? upcoming.length
+                      : products.length}
+                </span>
+              </button>
+            ))}
+          </div>
+          <label className="category-filter">
+            <SlidersHorizontal size={15} />
+            <select
+              aria-label="Filter category"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+            >
+              <option value="all">All categories</option>
+              <option value="pantry">Pantry staples</option>
+              <option value="dairy">Dairy</option>
+              <option value="home">Home care</option>
+              <option value="personal">Personal care</option>
+            </select>
+          </label>
         </div>
-        <div
-          id="products-panel"
-          role="tabpanel"
-          aria-labelledby={`tab-${tab}`}
-          className="product-list"
-        >
-          {visible.length ? (
-            visible.map((product) => (
-              <article className="product-card" key={product.id}>
-                <Link to={`/items/${product.id}`} className="product-main">
-                  <ProductArt kind={product.art} />
-                  <div className="product-information">
-                    <div className="product-name">
-                      <h3>{product.name}</h3>
-                      <ArrowUpRight size={14} />
-                    </div>
-                    <span className="pack-size">{product.pack}</span>
-                    <p>
-                      {f(c.home.lastBought, {
-                        days: dayDistance(product.last),
-                        store: product.store,
-                      })}
-                    </p>
-                  </div>
-                </Link>
-                <div className="cycle-row">
-                  <span>
-                    <Clock3 size={12} />
-                    {product.learning
-                      ? c.home.learning
-                      : f(c.home.usually, { days: product.gap })}
+        <div className="restock-grid">
+          {visible.map((product) => {
+            const remaining = Math.max(
+              5,
+              Math.min(
+                100,
+                100 - (dayDistance(product.last) / product.gap) * 100,
+              ),
+            );
+            const overdue = dayDistance(product.last) >= product.gap;
+            return (
+              <article className="restock-card" key={product.id}>
+                <div className="restock-card-top">
+                  <span className="category-tag">
+                    {product.category === "pantry"
+                      ? "Pantry staples"
+                      : product.category === "dairy"
+                        ? "Dairy & everyday"
+                        : product.category === "home"
+                          ? "Home care"
+                          : "Personal care"}
                   </span>
-                  <span
-                    className={`confidence ${product.confidence >= 0.7 ? "high" : "medium"}`}
-                  >
+                  <span className={`estimate-tag ${overdue ? "urgent" : ""}`}>
                     <span />
-                    {product.confidence >= 0.7
-                      ? c.home.high
-                      : product.confidence >= 0.4
-                        ? c.home.medium
-                        : c.home.low}
+                    {product.learning
+                      ? "Learning"
+                      : overdue
+                        ? "Running low"
+                        : "Due soon"}
                   </span>
                 </div>
-                {tab === "due" ? (
-                  <div className="product-actions">
-                    <button
-                      className="bought-button"
-                      aria-label={f(c.home.boughtLabel, { name: product.name })}
-                      onClick={() => action(product, "bought")}
-                    >
-                      <Check size={15} />
-                      {c.home.bought}
-                    </button>
-                    <button
-                      aria-label={f(c.home.notNeededLabel, {
-                        name: product.name,
-                      })}
-                      onClick={() => action(product, "not_needed")}
-                    >
-                      <Minus size={14} />
-                      {c.home.notNeeded}
-                    </button>
-                    <button
-                      aria-label={f(c.home.snoozeLabel, { name: product.name })}
-                      onClick={() => action(product, "snoozed")}
-                    >
-                      <Clock3 size={14} />
-                      {c.home.snooze}
-                    </button>
+                <Link to={`/items/${product.id}`} className="restock-product">
+                  <div className={`product-picture picture-${product.art}`}>
+                    <ProductArt kind={product.art} />
                   </div>
-                ) : (
-                  <Link
-                    className="item-details-link"
-                    to={`/items/${product.id}`}
+                  <div>
+                    <h3>{product.name}</h3>
+                    <p>
+                      {product.pack} <span>·</span> {product.store}
+                    </p>
+                    <small>
+                      Last bought {dayDistance(product.last)} days ago
+                    </small>
+                  </div>
+                </Link>
+                <div className="stock-meta">
+                  <span>
+                    {product.learning
+                      ? "Learning your routine"
+                      : overdue
+                        ? "Time to top up"
+                        : `About ${Math.max(1, Math.round(product.gap - dayDistance(product.last)))} days left`}
+                  </span>
+                  <span>
+                    {product.learning
+                      ? "New item"
+                      : `${Math.round(product.confidence * 100)}% confidence`}
+                  </span>
+                </div>
+                <div className={`stock-track ${overdue ? "low" : ""}`}>
+                  <span style={{ width: `${remaining}%` }} />
+                </div>
+                <div className="restock-actions">
+                  <button
+                    className="bought-action"
+                    disabled={busy === product.id}
+                    onClick={() => void action(product, "bought")}
                   >
-                    {product.learning ? c.home.learningCopy : c.item.cycle}
-                    <ArrowRight size={14} />
-                  </Link>
-                )}
+                    <Check size={16} /> Bought
+                  </button>
+                  <button
+                    disabled={busy === product.id}
+                    onClick={() => void action(product, "snoozed")}
+                  >
+                    <Clock3 size={14} /> +3 days
+                  </button>
+                  <button
+                    disabled={busy === product.id}
+                    aria-label={`Skip ${product.name}`}
+                    onClick={() => void action(product, "skip")}
+                  >
+                    <X size={15} /> Skip
+                  </button>
+                </div>
               </article>
-            ))
-          ) : (
-            <Empty
-              title={
-                state.products.length ? c.home.emptyTitle : c.home.firstTitle
-              }
-              description={
-                state.products.length
-                  ? c.home.emptyDescription
-                  : c.home.firstDescription
-              }
-              action={c.home.addBill}
-              onAction={() => navigate("/add")}
-            />
-          )}
+            );
+          })}
         </div>
+        {!visible.length && (
+          <Empty
+            title="A little breathing room."
+            description="Nothing due here. Your pantry is in a good place."
+          />
+        )}
       </section>
-      <div className="learning-tip">
-        <span>
-          <Lightbulb size={18} />
-        </span>
-        <div>
-          <h3>{c.home.tipTitle}</h3>
-          <p>{c.home.tipCopy}</p>
+      <div className="dashboard-bottom">
+        <Link to="/add" className="scan-callout">
+          <span className="scan-callout-icon">
+            <ScanLine size={25} />
+          </span>
+          <div>
+            <h3>Paper bill? Meet a smarter pantry.</h3>
+            <p>One photo. Every essential accounted for.</p>
+          </div>
+          <span className="scan-callout-link">
+            Scan a bill <ArrowRight size={16} />
+          </span>
+        </Link>
+        <div className="insight-callout">
+          <span className="insight-label">
+            <Lightbulb size={15} /> THE LITTLE THINGS
+          </span>
+          <p>
+            The more you add, the better we learn.
+            <br />
+            Your pantry gets smarter with every shop.
+          </p>
+          <Link to="/history">
+            Your shopping rhythm <ChevronRight size={15} />
+          </Link>
         </div>
       </div>
-      <p className="page-footnote">{c.home.footer}</p>
-      {ignore && (
-        <Sheet title={c.home.ignorePrompt} onClose={() => setIgnore(null)}>
-          <p>{c.home.ignoreCopy}</p>
-          <Button
-            onClick={() => {
-              setState((s) => ({
-                ...s,
-                products: s.products.map((p) =>
-                  p.id === ignore.id ? { ...p, ignored: true } : p,
-                ),
-              }));
-              setIgnore(null);
-            }}
-          >
-            {c.home.ignore}
-          </Button>
-          <Button variant="ghost" onClick={() => setIgnore(null)}>
-            {c.home.keep}
-          </Button>
-        </Sheet>
-      )}
+      <div className="home-reassurance">
+        <ShieldCheck size={14} /> Your pantry, your privacy. Always.
+      </div>
     </div>
-  );
-}
-function ShoppingBagIcon() {
-  return (
-    <svg
-      width="20"
-      height="20"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.4"
-      aria-hidden="true"
-    >
-      <path d="M5 8h14l1 12H4L5 8Z" />
-      <path d="M8 9V6a4 4 0 0 1 8 0v3" />
-    </svg>
   );
 }
