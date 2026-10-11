@@ -26,6 +26,7 @@ export const productSchema = z.object({
     "lentils",
   ]),
   gap: z.number().positive(),
+  overrideGap: z.number().int().min(1).max(365).nullable().optional(),
   confidence: z.number().min(0).max(1),
   last: z.string().date(),
   store: z.string(),

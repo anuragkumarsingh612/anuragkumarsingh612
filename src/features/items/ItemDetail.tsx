@@ -6,11 +6,16 @@ import { useDemo } from "../../app/context";
 import { copy as c, interpolate as f } from "../../lib/i18n";
 import { dateLabel, rupees } from "../../lib/format";
 import { ProductArt } from "../../components/Artwork";
+import { updateProduct } from "../../lib/supabase";
+import { cycleForProduct } from "../../lib/cycles";
 import { Button, Empty, PageHeading, Card } from "../../components/ui";
 export default function ItemDetail() {
   const { id } = useParams();
   const { state, setState, notify } = useDemo();
-  const product = state.products.find((p) => p.id === id);
+  const storedProduct = state.products.find((p) => p.id === id);
+  const product = storedProduct
+    ? cycleForProduct(storedProduct, state.purchases)
+    : undefined;
   const [gap, setGap] = useState(String(product?.gap ?? 30));
   const [ignored, setIgnored] = useState(product?.ignored ?? false);
   const [error, setError] = useState("");
@@ -87,17 +92,34 @@ export default function ItemDetail() {
       </Card>
       <form
         className="card preferences-card"
-        onSubmit={(event) => {
+        onSubmit={async (event) => {
           event.preventDefault();
           const result = z.coerce.number().int().min(1).max(365).safeParse(gap);
           if (!result.success) {
             setError(c.item.invalidDays);
             return;
           }
+          try {
+            await updateProduct(product.id, {
+              manual_cycle_days: result.data,
+              ignored,
+            });
+          } catch (e) {
+            setError(e instanceof Error ? e.message : "Could not save.");
+            return;
+          }
           setState((s) => ({
             ...s,
             products: s.products.map((p) =>
-              p.id === id ? { ...p, gap: result.data, ignored } : p,
+              p.id === id
+                ? {
+                    ...p,
+                    gap: result.data,
+                    overrideGap: result.data,
+                    ignored,
+                    learning: false,
+                  }
+                : p,
             ),
           }));
           setError("");
